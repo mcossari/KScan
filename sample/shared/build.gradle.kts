@@ -10,8 +10,6 @@ plugins {
 kotlin {
     androidTarget()
 
-    jvm()
-
     listOf(
         iosX64(),
         iosArm64(),
@@ -22,9 +20,6 @@ kotlin {
             isStatic = true
         }
     }
-
-    @OptIn(ExperimentalWasmDsl::class)
-    wasmJs()
 
     sourceSets {
         commonMain.dependencies {
@@ -63,6 +58,8 @@ android {
 
     defaultConfig {
         minSdk = libs.versions.android.minSdk.get().toInt()
+        // Ensure consumer rules are packaged with the AAR for release builds
+        consumerProguardFiles("consumer-rules.pro")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
