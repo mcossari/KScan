@@ -37,6 +37,12 @@ import platform.UIKit.UIInterfaceOrientationLandscapeRight
 import platform.UIKit.UIInterfaceOrientationPortraitUpsideDown
 import platform.UIKit.UIViewController
 import platform.darwin.dispatch_get_main_queue
+import kotlinx.cinterop.*
+import platform.AVFoundation.descriptor
+import platform.CoreImage.CIQRCodeDescriptor
+import platform.Foundation.NSData
+import platform.posix.memcpy
+
 
 /**
  * A UIViewController that manages the camera preview and barcode scanning.
@@ -158,32 +164,36 @@ class CameraViewController(
     private fun processBarcodes(metadataObjects: List<*>) {
         metadataObjects
             .filterIsInstance<AVMetadataMachineReadableCodeObject>()
-            .mapNotNull { metadataObject ->
-                if (!::previewLayer.isInitialized) return@mapNotNull null
-                previewLayer.transformedMetadataObjectForMetadataObject(metadataObject)
-                    as? AVMetadataMachineReadableCodeObject
-            }
             .filter { barcodeObject ->
                 isRequestedFormat(barcodeObject.type)
             }.forEach { barcodeObject ->
-                processDetectedBarcode(barcodeObject.stringValue ?: "", barcodeObject.type)
+                processDetectedBarcode(barcodeObject)
             }
     }
 
     private fun processDetectedBarcode(
-        value: String,
-        type: AVMetadataObjectType,
+        original: AVMetadataMachineReadableCodeObject,
     ) {
-        barcodesDetected[value] = (barcodesDetected[value] ?: 0) + 1
+        val value = original.stringValue ?: ""
+        val type = original.type
 
-        if ((barcodesDetected[value] ?: 0) >= 2) {
+        val key = value.ifEmpty { type.toString() }
+        barcodesDetected[key] = (barcodesDetected[key] ?: 0) + 1
+
+        if ((barcodesDetected[key] ?: 0) >= 2) {
             val appSpecificFormat = type.toFormat()
-            val barcode =
-                Barcode(
-                    data = value,
-                    format = appSpecificFormat.toString(),
-                    rawBytes = value.encodeToByteArray(),
-                )
+
+            val rawBytes: ByteArray =
+                if (type == AVMetadataObjectTypeQRCode)
+                    original.qrRawBytes()
+                else
+                    value.encodeToByteArray() // unchanged for non-QR
+
+            val barcode = Barcode(
+                data = value,
+                format = appSpecificFormat.toString(),
+                rawBytes = rawBytes,
+            )
 
             if (!filter(barcode)) return
 
@@ -194,6 +204,35 @@ class CameraViewController(
             }
         }
     }
+
+    @OptIn(ExperimentalForeignApi::class)
+    private fun AVMetadataMachineReadableCodeObject.qrRawBytes(): ByteArray {
+        // descriptor is a CoreImage CIQRCodeDescriptor when type is QR
+        val qrDescriptor = this.descriptor as? CIQRCodeDescriptor
+            ?: return (this.stringValue ?: "").encodeToByteArray()
+
+        val payload = qrDescriptor.errorCorrectedPayload as NSData
+        return payload.toByteArray()
+    }
+
+    @OptIn(ExperimentalForeignApi::class)
+    private fun NSData.toByteArray(): ByteArray {
+        val size = this.length.toInt()
+        val bytes = ByteArray(size)
+
+        memScoped {
+            // Copy from NSData.bytes to Kotlin ByteArray
+            memcpy(
+                bytes.refTo(0),
+                this@toByteArray.bytes,
+                this@toByteArray.length
+            )
+        }
+
+        return bytes
+    }
+
+
 
     @OptIn(ExperimentalForeignApi::class)
     fun setZoom(ratio: Float) {
