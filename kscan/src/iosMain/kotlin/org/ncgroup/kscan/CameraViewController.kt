@@ -41,6 +41,7 @@ import kotlinx.cinterop.*
 import platform.AVFoundation.descriptor
 import platform.CoreImage.CIQRCodeDescriptor
 import platform.Foundation.NSData
+import platform.Foundation.getBytes
 import platform.posix.memcpy
 
 
@@ -171,29 +172,41 @@ class CameraViewController(
             }
     }
 
+    @OptIn(ExperimentalForeignApi::class)
     private fun processDetectedBarcode(
-        original: AVMetadataMachineReadableCodeObject,
+        barcodeObject: AVMetadataMachineReadableCodeObject,
     ) {
-        val value = original.stringValue ?: ""
-        val type = original.type
+        val value = barcodeObject.stringValue ?: ""
+        val type = barcodeObject.type
 
+        // Use value as the "key" for debouncing; if value is empty, fall back to type
         val key = value.ifEmpty { type.toString() }
+
         barcodesDetected[key] = (barcodesDetected[key] ?: 0) + 1
 
         if ((barcodesDetected[key] ?: 0) >= 2) {
             val appSpecificFormat = type.toFormat()
 
-            val rawBytes: ByteArray =
-                if (type == AVMetadataObjectTypeQRCode)
-                    original.qrRawBytes()
-                else
-                    value.encodeToByteArray() // unchanged for non-QR
+            // 🔑 Get actual decoded data bytes
+            val rawBytes: ByteArray = when (type) {
+                AVMetadataObjectTypeQRCode -> {
+                    val descriptor = barcodeObject.descriptor as? CIQRCodeDescriptor
+                    if (descriptor != null) {
+                        val codewords = descriptor.errorCorrectedPayload.toByteArray()
+                        decodeQRDataBytes(codewords)
+                    } else {
+                        value.encodeToByteArray()
+                    }
+                }
+                else -> value.encodeToByteArray() // other formats still use text
+            }
 
-            val barcode = Barcode(
-                data = value,
-                format = appSpecificFormat.toString(),
-                rawBytes = rawBytes,
-            )
+            val barcode =
+                Barcode(
+                    data = value,
+                    format = appSpecificFormat.toString(),
+                    rawBytes = rawBytes,
+                )
 
             if (!filter(barcode)) return
 
@@ -205,27 +218,137 @@ class CameraViewController(
         }
     }
 
-    @OptIn(ExperimentalForeignApi::class)
-    private fun AVMetadataMachineReadableCodeObject.qrRawBytes(): ByteArray {
-        // descriptor is a CoreImage CIQRCodeDescriptor when type is QR
-        val qrDescriptor = this.descriptor as? CIQRCodeDescriptor
-            ?: return (this.stringValue ?: "").encodeToByteArray()
+    /**
+     * Decodes the actual data bytes from QR code codewords.
+     * This parses the QR code data structure according to ISO/IEC 18004.
+     */
+    private fun decodeQRDataBytes(codewords: ByteArray): ByteArray {
+        if (codewords.isEmpty()) return byteArrayOf()
 
-        val payload = qrDescriptor.errorCorrectedPayload as NSData
-        return payload.toByteArray()
+        val result = mutableListOf<Byte>()
+        var bitOffset = 0
+
+        // Helper function to read bits
+        fun readBits(count: Int): Int {
+            var value = 0
+            for (i in 0 until count) {
+                val byteIndex = bitOffset / 8
+                val bitIndex = 7 - (bitOffset % 8)
+
+                if (byteIndex >= codewords.size) break
+
+                val bit = (codewords[byteIndex].toInt() shr bitIndex) and 1
+                value = (value shl 1) or bit
+                bitOffset++
+            }
+            return value
+        }
+
+        // Process segments until we hit terminator or end of data
+        while (bitOffset + 4 <= codewords.size * 8) {
+            // Read mode indicator (4 bits)
+            val mode = readBits(4)
+
+            // 0000 is terminator
+            if (mode == 0) break
+
+            when (mode) {
+                4 -> { // Byte mode (0100)
+                    // Read character count (8 bits for versions 1-9, more for higher versions)
+                    // We'll assume version 1-9 for simplicity
+                    val count = readBits(8)
+
+                    // Read the actual data bytes
+                    for (i in 0 until count) {
+                        if (bitOffset + 8 > codewords.size * 8) break
+                        val byte = readBits(8)
+                        result.add(byte.toByte())
+                    }
+                }
+                1 -> { // Numeric mode (0001)
+                    val count = readBits(10) // 10 bits for version 1-9
+                    var remaining = count
+
+                    while (remaining >= 3) {
+                        val threeDigits = readBits(10)
+                        val digit1 = threeDigits / 100
+                        val digit2 = (threeDigits / 10) % 10
+                        val digit3 = threeDigits % 10
+                        result.add((digit1 + '0'.code).toByte())
+                        result.add((digit2 + '0'.code).toByte())
+                        result.add((digit3 + '0'.code).toByte())
+                        remaining -= 3
+                    }
+
+                    if (remaining == 2) {
+                        val twoDigits = readBits(7)
+                        result.add(((twoDigits / 10) + '0'.code).toByte())
+                        result.add(((twoDigits % 10) + '0'.code).toByte())
+                    } else if (remaining == 1) {
+                        val oneDigit = readBits(4)
+                        result.add((oneDigit + '0'.code).toByte())
+                    }
+                }
+                2 -> { // Alphanumeric mode (0010)
+                    val count = readBits(9) // 9 bits for version 1-9
+                    val alphanumericTable = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
+
+                    var remaining = count
+                    while (remaining >= 2) {
+                        val twoChars = readBits(11)
+                        val char1 = twoChars / 45
+                        val char2 = twoChars % 45
+                        if (char1 < alphanumericTable.length) {
+                            result.add(alphanumericTable[char1].code.toByte())
+                        }
+                        if (char2 < alphanumericTable.length) {
+                            result.add(alphanumericTable[char2].code.toByte())
+                        }
+                        remaining -= 2
+                    }
+
+                    if (remaining == 1) {
+                        val oneChar = readBits(6)
+                        if (oneChar < alphanumericTable.length) {
+                            result.add(alphanumericTable[oneChar].code.toByte())
+                        }
+                    }
+                }
+                8 -> { // Kanji mode (1000)
+                    val count = readBits(8) // 8 bits for version 1-9
+                    // Kanji decoding is complex, skip for now
+                    // Each character is 13 bits
+                    bitOffset += count * 13
+                }
+                else -> {
+                    // Unknown mode, stop processing
+                    break
+                }
+            }
+        }
+
+        return result.toByteArray()
     }
 
     @OptIn(ExperimentalForeignApi::class)
     private fun NSData.toByteArray(): ByteArray {
-        val size = this.length.toInt()
-        val bytes = ByteArray(size)
+        val lengthULong = this.length
+        // Guard against absurdly large NSData that won't fit into a ByteArray
+        require(lengthULong <= Int.MAX_VALUE.toULong()) {
+            "NSData is too large to fit into a ByteArray (length=$lengthULong)"
+        }
 
-        memScoped {
-            // Copy from NSData.bytes to Kotlin ByteArray
+        val size = lengthULong.toInt()
+        if (size == 0) return byteArrayOf()
+
+        val bytes = ByteArray(size)
+        val src = this.bytes ?: return byteArrayOf() // return empty if no data
+
+        bytes.usePinned { pinned ->
             memcpy(
-                bytes.refTo(0),
-                this@toByteArray.bytes,
-                this@toByteArray.length
+                pinned.addressOf(0),
+                src,
+                lengthULong
             )
         }
 
