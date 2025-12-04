@@ -65,20 +65,11 @@ android {
 }
 
 mavenPublishing {
-
     coordinates(
         "io.github.mcossari",
         "KScan",
         "0.4.0-mc1"
     )
-
-    repositories {
-        maven {
-            uri("https://maven.pkg.github.com/mcossari/KScan")
-            System.getenv("GITHUB_ACTOR") ?: ""
-            System.getenv("GITHUB_TOKEN") ?: ""
-        }
-    }
 
     pom {
         name.set("KScan (fork by mcossari)")

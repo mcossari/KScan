@@ -1,10 +1,6 @@
 rootProject.name = "KScan"
 
-include(":sample:androidApp")
 include(":kscan")
-include(":sample:desktopApp")
-include(":sample:shared")
-include(":sample:webApp")
 
 pluginManagement {
     repositories {
@@ -24,5 +20,10 @@ dependencyResolutionManagement {
         mavenCentral()
         google()
         maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/mcossari/KScan")
+            credentials(PasswordCredentials::class)
+        }
     }
 }
