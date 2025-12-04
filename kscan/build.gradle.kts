@@ -72,6 +72,14 @@ mavenPublishing {
         "0.4.0-mc1"
     )
 
+    repositories {
+        maven {
+            uri("https://maven.pkg.github.com/mcossari/KScan")
+            System.getenv("GITHUB_ACTOR") ?: ""
+            System.getenv("GITHUB_TOKEN") ?: ""
+        }
+    }
+
     pom {
         name.set("KScan (fork by mcossari)")
         description.set("Fork of KScan: Compose Multiplatform Barcode Scanning Library with custom changes")
@@ -107,4 +115,5 @@ mavenPublishing {
         }
     }
 }
+
 
