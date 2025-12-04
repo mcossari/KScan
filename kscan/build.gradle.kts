@@ -67,7 +67,7 @@ android {
 mavenPublishing {
     coordinates(
         "io.github.mcossari",
-        "KScan",
+        "kscan",
         "0.4.0-mc1"
     )
 
@@ -103,6 +103,16 @@ mavenPublishing {
             url.set("https://github.com/mcossari/KScan")
             connection.set("scm:git:git://github.com/mcossari/KScan.git")
             developerConnection.set("scm:git:ssh://git@github.com/mcossari/KScan.git")
+        }
+    }
+}
+
+publishing {
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/mcossari/KScan")
+            credentials(PasswordCredentials::class)
         }
     }
 }
