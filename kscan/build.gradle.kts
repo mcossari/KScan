@@ -65,17 +65,20 @@ android {
 }
 
 mavenPublishing {
-//    publishToMavenCentral(SonatypeHost.DEFAULT)
-    // or when publishing to https://s01.oss.sonatype.org
-    // publishToMavenCentral()
-    // signAllPublications()
-    coordinates("io.github.ismai117", "KScan", "0.4.0-local")
+
+    coordinates(
+        "io.github.mcossari",
+        "KScan",
+        "0.4.0-mc1"
+    )
 
     pom {
-        name.set(project.name)
-        description.set("Compose Multiplatform Barcode Scanning Library")
-        inceptionYear.set("2024")
-        url.set("https://github.com/ismai117/KScan/")
+        name.set("KScan (fork by mcossari)")
+        description.set("Fork of KScan: Compose Multiplatform Barcode Scanning Library with custom changes")
+        inceptionYear.set("2025")
+
+        url.set("https://github.com/mcossari/KScan")
+
         licenses {
             license {
                 name.set("The Apache License, Version 2.0")
@@ -83,17 +86,25 @@ mavenPublishing {
                 distribution.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
             }
         }
+
         developers {
             developer {
                 id.set("ismai117")
                 name.set("ismai117")
                 url.set("https://github.com/ismai117/")
             }
+            developer {
+                id.set("mcossari")
+                name.set("mcossari")
+                url.set("https://github.com/mcossari")
+            }
         }
+
         scm {
-            url.set("https://github.com/ismai117/KScan/")
-            connection.set("scm:git:git://github.com/ismai117/KScan.git")
-            developerConnection.set("scm:git:ssh://git@github.com/ismai117/KScan.git")
+            url.set("https://github.com/mcossari/KScan")
+            connection.set("scm:git:git://github.com/mcossari/KScan.git")
+            developerConnection.set("scm:git:ssh://git@github.com/mcossari/KScan.git")
         }
     }
 }
+
